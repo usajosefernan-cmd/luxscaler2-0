@@ -21,7 +21,4 @@ jobs:
       
       - name: Push to Replicate
         run: |
-          cog push r8.im/usajosefernan-cmd/luxscaler2-0 --env GEMINI_API_KEY=AIzaSyCE3dBuBcDAyTtj8AaoLQVSQw4ryn4N2jc
-        env:
-          REPLICATE_API_TOKEN: ${{ secrets.REPLICATE_API_TOKEN }}
-          GEMINI_API_KEY: AIzaSyCE3dBuBcDAyTtj8AaoLQVSQw4ryn4N2jc
+          cog push r8.im/usajosefernan-cmd/luxscaler2-0
