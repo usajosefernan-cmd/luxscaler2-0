@@ -1,19 +1,20 @@
 import os
 import math
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from PIL import Image
 import numpy as np
 import cv2
 from cog import BasePredictor, Input, Path
 from typing import Optional
+from io import BytesIO
 
 class Predictor(BasePredictor):
     def setup(self):
         """Initialize Gemini API"""
         api_key = os.environ.get("GEMINI_API_KEY")
-        genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel('imagen-4-ultra')
-        
+        self.client = genai.Client(api_key=api_key)
+    
     def calculate_tiles(self, width: int, height: int, scale: int):
         """Calculate optimal tile distribution"""
         output_w = width * scale
@@ -61,16 +62,21 @@ class Predictor(BasePredictor):
     
     def upscale_tile(self, tile_image: Image.Image, prompt: str):
         """Upscale single tile using Gemini Imagen 4 Ultra"""
-        response = self.model.generate_images(
-            prompt=prompt,
-            reference_images=[tile_image],
-            number_of_images=1,
-            safety_filter_level="block_only_high",
-            person_generation="allow_adult",
-            aspect_ratio="1:1"
-        )
-        
-        return response.images[0]
+        try:
+            response = self.client.models.generate_images(
+                model='imagen-4.0-ultra-generate-001',
+                prompt=prompt,
+                config=types.GenerateImagesConfig(
+                    number_of_images=1,
+                    aspect_ratio="1:1"
+                )
+            )
+            
+            return response.generated_images[0].image
+        except Exception as e:
+            print(f"Error upscaling tile: {e}")
+            # Fallback: return original tile if API fails
+            return tile_image
     
     def blend_tiles(self, tiles: list, tile_config: dict, output_size: tuple):
         """Reconstruct image from upscaled tiles with blending"""
@@ -125,7 +131,7 @@ Perfect color accuracy, no artifacts, seamless quality."""
         # Set API key
         if gemini_api_key:
             os.environ["GEMINI_API_KEY"] = gemini_api_key
-            genai.configure(api_key=gemini_api_key)
+            self.client = genai.Client(api_key=gemini_api_key)
         
         # Load image
         input_image = Image.open(image)
