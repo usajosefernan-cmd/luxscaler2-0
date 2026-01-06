@@ -1,4 +1,4 @@
-# Luxscaler 2.0 - AI-powered upscaling with Gemini 2.5 Flash + Imagen 3.0 v4 v5 v6
+# Luxscaler 2.0 - AI-powered upscaling with Gemini 2.5 Flash + Imagen 3.0 v4 v5 v6 v7
 import os
 import math
 import json
@@ -21,12 +21,10 @@ class Predictor(BasePredictor):
         gemini_api_key: str = Input(description="Gemini API Key (optional)", default="")
     ) -> Path:
         
-        # Configurar API key si se proporciona
-        if gemini_api_key:
-                    # Usar la API key proporcionada por el usuario o la de entorno
+                # Configurar API key si se proporciona
         api_key = gemini_api_key if gemini_api_key else "AIzaSyCE3dBuBcDAyTtj8AaoLQVSQw4ryn4N2jc"
-        genai.configure(api_key=api_key)            self.setup()
-        
+        genai.configure(api_key=api_key)
+        self.setup()
         # Cargar imagen original
         input_img = Image.open(image).convert('RGB')
         input_width, input_height = input_img.size
