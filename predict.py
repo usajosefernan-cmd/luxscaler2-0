@@ -1,3 +1,4 @@
+# Luxscaler 2.0 - AI-powered upscaling with Gemini 2.5 Flash + Imagen 3.0
 import os
 import math
 import json
