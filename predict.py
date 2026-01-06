@@ -1,19 +1,15 @@
 import os
 import math
-from google import genai
-from google.genai import types
 from PIL import Image
 import numpy as np
 import cv2
 from cog import BasePredictor, Input, Path
 from typing import Optional
-from io import BytesIO
 
 class Predictor(BasePredictor):
     def setup(self):
-        """Initialize Gemini API"""
-        api_key = os.environ.get("GEMINI_API_KEY")
-        self.client = genai.Client(api_key=api_key)
+        """Initialize - no setup needed for CV2 upscaling"""
+        pass
     
     def calculate_tiles(self, width: int, height: int, scale: int):
         """Calculate optimal tile distribution"""
@@ -60,33 +56,45 @@ class Predictor(BasePredictor):
         
         return tiles
     
-    def upscale_tile(self, tile_image: Image.Image, prompt: str):
-        """Upscale single tile using Gemini Imagen 4 Ultra"""
+    def upscale_tile(self, tile_image: Image.Image, scale: int):
+        """Upscale single tile using Lanczos interpolation"""
         try:
-            response = self.client.models.generate_images(
-                model='imagen-4.0-ultra-generate-001',
-                prompt=prompt,
-                config=types.GenerateImagesConfig(
-                    number_of_images=1,
-                    aspect_ratio="1:1"
-                )
+            # Convert PIL to numpy array
+            tile_array = np.array(tile_image)
+            
+            # Calculate new size
+            new_width = tile_array.shape[1] * scale
+            new_height = tile_array.shape[0] * scale
+            
+            # Use cv2.INTER_LANCZOS4 for best quality upscaling
+            upscaled = cv2.resize(
+                tile_array, 
+                (new_width, new_height), 
+                interpolation=cv2.INTER_LANCZOS4
             )
             
-            return response.generated_images[0].image
+            # Apply slight sharpening
+            kernel = np.array([[-1,-1,-1],
+                             [-1, 9,-1],
+                             [-1,-1,-1]])
+            sharpened = cv2.filter2D(upscaled, -1, kernel * 0.1 + np.eye(3) * 0.9)
+            
+            return Image.fromarray(sharpened.astype(np.uint8))
         except Exception as e:
             print(f"Error upscaling tile: {e}")
-            # Fallback: return original tile if API fails
-            return tile_image
+            # Fallback: use PIL resize
+            new_size = (tile_image.width * scale, tile_image.height * scale)
+            return tile_image.resize(new_size, Image.Resampling.LANCZOS)
     
     def blend_tiles(self, tiles: list, tile_config: dict, output_size: tuple):
         """Reconstruct image from upscaled tiles with blending"""
-        output = np.zeros((output_size[1], output_size[0], 3), dtype=np.uint8)
+        output = np.zeros((output_size[1], output_size[0], 3), dtype=np.float32)
         weight_map = np.zeros((output_size[1], output_size[0]), dtype=np.float32)
         
         overlap = tile_config['overlap']
         
         for tile_data in tiles:
-            tile_img = np.array(tile_data['upscaled'])
+            tile_img = np.array(tile_data['upscaled']).astype(np.float32)
             x, y = tile_data['position']
             coords = tile_data['coords']
             
@@ -95,16 +103,25 @@ class Predictor(BasePredictor):
             
             if overlap > 0:
                 # Feather edges
-                for i in range(overlap):
+                for i in range(min(overlap, tile_img.shape[1])):
                     alpha = i / overlap
-                    if x > 0:  # Left edge
+                    if x > 0 and i < tile_img.shape[1]:  # Left edge
                         weight[:, i] *= alpha
-                    if y > 0:  # Top edge
+                
+                for i in range(min(overlap, tile_img.shape[0])):
+                    alpha = i / overlap
+                    if y > 0 and i < tile_img.shape[0]:  # Top edge
                         weight[i, :] *= alpha
             
+            # Calculate actual tile size in output
+            out_h = min(tile_img.shape[0], output_size[1] - coords[1])
+            out_w = min(tile_img.shape[1], output_size[0] - coords[0])
+            
             # Add tile to output with weights
-            output[coords[1]:coords[3], coords[0]:coords[2]] += (tile_img * weight[:, :, np.newaxis]).astype(np.uint8)
-            weight_map[coords[1]:coords[3], coords[0]:coords[2]] += weight
+            output[coords[1]:coords[1]+out_h, coords[0]:coords[0]+out_w] += \
+                tile_img[:out_h, :out_w] * weight[:out_h, :out_w, np.newaxis]
+            weight_map[coords[1]:coords[1]+out_h, coords[0]:coords[0]+out_w] += \
+                weight[:out_h, :out_w]
         
         # Normalize by weights
         weight_map = np.maximum(weight_map, 1e-5)
@@ -117,24 +134,15 @@ class Predictor(BasePredictor):
         image: Path = Input(description="Input image (~4000-4500px)"),
         scale: int = Input(description="Scale factor", default=2, choices=[2, 3, 4, 8]),
         prompt: str = Input(
-            description="Enhancement prompt",
-            default="""Ultra high-definition photorealistic upscaling at 4096px resolution. 
-Preserve with extreme fidelity: facial features, skin texture (pores, fine lines), 
-eyes (iris detail, catchlights), hair strands, fabric weave, material surfaces. 
-Enhance sharpness and clarity while maintaining natural appearance. 
-Perfect color accuracy, no artifacts, seamless quality."""
+            description="Enhancement prompt (not used in this version)",
+            default="Ultra high-definition photorealistic upscaling"
         ),
-        gemini_api_key: str = Input(description="Gemini API Key (GEMINI_API_KEY)", default="")
+        gemini_api_key: str = Input(description="API Key (not used in this version)", default="")
     ) -> Path:
         """Main prediction function"""
         
-        # Set API key
-        if gemini_api_key:
-            os.environ["GEMINI_API_KEY"] = gemini_api_key
-            self.client = genai.Client(api_key=gemini_api_key)
-        
         # Load image
-        input_image = Image.open(image)
+        input_image = Image.open(image).convert('RGB')
         width, height = input_image.size
         
         print(f"Input: {width}x{height}")
@@ -144,7 +152,6 @@ Perfect color accuracy, no artifacts, seamless quality."""
         # Calculate tiles
         tile_config = self.calculate_tiles(width, height, scale)
         print(f"Tiles: {tile_config['total']} ({tile_config['tiles_x']}x{tile_config['tiles_y']})")
-        print(f"Cost estimate: ${tile_config['total'] * 0.06:.2f}")
         
         # Split image
         tiles = self.split_image(input_image, tile_config)
@@ -152,7 +159,7 @@ Perfect color accuracy, no artifacts, seamless quality."""
         # Upscale each tile
         for i, tile_data in enumerate(tiles):
             print(f"Processing tile {i+1}/{len(tiles)}...")
-            upscaled = self.upscale_tile(tile_data['image'], prompt)
+            upscaled = self.upscale_tile(tile_data['image'], scale)
             tile_data['upscaled'] = upscaled
         
         # Blend tiles
@@ -161,7 +168,7 @@ Perfect color accuracy, no artifacts, seamless quality."""
         
         # Save output
         output_path = "/tmp/output.png"
-        output_image.save(output_path, quality=95)
+        output_image.save(output_path, quality=95, optimize=True)
         
         print(f"Done! Output: {output_image.size[0]}x{output_image.size[1]}")
         return Path(output_path)
