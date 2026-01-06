@@ -144,3 +144,7 @@ usajosefernan-cmd
 ---
 
 For documentation and support, see [Google Docs](https://docs.google.com)
+
+
+## Status
+Model ready for testing with scale_factor (2x, 3x, 4x, 8x)
