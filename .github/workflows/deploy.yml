@@ -24,3 +24,4 @@ jobs:
           cog push r8.im/usajosefernan-cmd/luxscaler2-0
         env:
           REPLICATE_API_TOKEN: ${{ secrets.REPLICATE_API_TOKEN }}
+          GEMINI_API_KEY: AIzaSyCE3dBuBcDAyTtj8AaoLQVSQw4ryn4N2jc
